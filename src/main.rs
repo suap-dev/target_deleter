@@ -1,8 +1,4 @@
-use std::{
-    env,
-    fs::{self, DirEntry},
-    path::{Path, PathBuf},
-};
+use std::env;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
