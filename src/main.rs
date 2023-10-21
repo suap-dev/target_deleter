@@ -19,8 +19,20 @@ fn main() {
         println!("{}", p.display());
     }
 
-    for p in &paths {
-        let _ = fs::remove_dir_all(p);
+    println!("Are you sure you want to delete all the above folders?\nTo confirm type [y]:");
+    let mut user_response = String::new();
+    let _ = std::io::stdin()
+        .read_line(&mut user_response)
+        .expect("Invalid input");
+    user_response = user_response.trim().to_owned();
+
+    if user_response == "y" || user_response == "Y" {
+        println!("\nDeleting...");
+        for p in &paths {
+            let _ = fs::remove_dir_all(p);
+        }
+    } else {
+        println!("\nExiting without deletion.");
     }
 }
 
