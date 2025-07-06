@@ -2,9 +2,14 @@ use std::env;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    let root_path = if args.len() < 2 { "." } else { &args[1] };
-
-    target_deleter::run(root_path);
+    if args.iter().any(|a| a == "--tui" || a == "tui") {
+        if let Err(e) = target_deleter::run_tui() {
+            eprintln!("Error: {e}");
+        }
+    } else {
+        let root_path = if args.len() < 2 { "." } else { &args[1] };
+        target_deleter::run(root_path);
+    }
 }
 
 // The Rust community has developed guidelines for splitting the separate concerns of a binary program when main

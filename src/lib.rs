@@ -1,6 +1,18 @@
 use std::{
     fs::{self, DirEntry},
+    io,
     path::{Path, PathBuf},
+};
+
+use crossterm::{
+    event::{self, Event, KeyCode},
+    execute,
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+};
+use ratatui::{
+    backend::CrosstermBackend,
+    widgets::{Block, Borders, List, ListItem, ListState},
+    Terminal,
 };
 
 pub fn run(root_path: &str) {
@@ -13,6 +25,33 @@ pub fn run(root_path: &str) {
     } else {
         println!("\nExiting without deletion.");
     };
+}
+
+pub fn run_tui() -> io::Result<()> {
+    enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    execute!(stdout, EnterAlternateScreen)?;
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
+
+    let root = select_root(&mut terminal)?;
+    let mut targets: Vec<PathBuf> = Vec::new();
+    find_target_paths(&root, &mut targets);
+
+    let chosen = select_targets(&mut terminal, &targets)?;
+
+    disable_raw_mode()?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+
+    if chosen.is_empty() {
+        println!("No folders selected. Exiting without deletion.");
+    } else if confirm_deletion() {
+        println!("\nDeleting...");
+        delete_folders(&chosen);
+    } else {
+        println!("\nExiting without deletion.");
+    }
+    Ok(())
 }
 
 fn confirm_deletion() -> bool {
@@ -55,4 +94,131 @@ fn sub_folders<P: AsRef<Path>>(path: P) -> Vec<DirEntry> {
             entry.file_type().unwrap().is_dir()
         })
         .collect()
+}
+
+fn select_root(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<PathBuf> {
+    let mut folders = sub_folders(".");
+    folders.sort_by_key(|f| f.file_name());
+    let mut state = ListState::default();
+    if !folders.is_empty() {
+        state.select(Some(0));
+    }
+
+    loop {
+        terminal.draw(|f| {
+            let items: Vec<ListItem> = folders
+                .iter()
+                .map(|e| ListItem::new(e.file_name().to_string_lossy().to_string()))
+                .collect();
+            let list = List::new(items)
+                .block(
+                    Block::default()
+                        .title("Select root folder")
+                        .borders(Borders::ALL),
+                )
+                .highlight_symbol("-> ");
+            f.render_stateful_widget(list, f.size(), &mut state);
+        })?;
+
+        if event::poll(std::time::Duration::from_millis(200))? {
+            if let Event::Key(key) = event::read()? {
+                match key.code {
+                    KeyCode::Up => {
+                        if let Some(selected) = state.selected() {
+                            let new = if selected > 0 {
+                                selected - 1
+                            } else {
+                                folders.len() - 1
+                            };
+                            state.select(Some(new));
+                        }
+                    }
+                    KeyCode::Down => {
+                        if let Some(selected) = state.selected() {
+                            let new = if selected + 1 < folders.len() {
+                                selected + 1
+                            } else {
+                                0
+                            };
+                            state.select(Some(new));
+                        }
+                    }
+                    KeyCode::Enter => {
+                        if let Some(selected) = state.selected() {
+                            return Ok(folders[selected].path());
+                        }
+                    }
+                    KeyCode::Char('q') => return Ok(PathBuf::from(".")),
+                    _ => {}
+                }
+            }
+        }
+    }
+}
+
+fn select_targets(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    targets: &Vec<PathBuf>,
+) -> io::Result<Vec<PathBuf>> {
+    let mut state = ListState::default();
+    if !targets.is_empty() {
+        state.select(Some(0));
+    }
+    let mut selected: Vec<bool> = vec![false; targets.len()];
+
+    loop {
+        terminal.draw(|f| {
+            let items: Vec<ListItem> = targets
+                .iter()
+                .enumerate()
+                .map(|(i, p)| {
+                    let mark = if selected[i] { "[x]" } else { "[ ]" };
+                    ListItem::new(format!("{mark} {}", p.display()))
+                })
+                .collect();
+            let list = List::new(items)
+                .block(
+                    Block::default()
+                        .title("Select targets - d to delete, q to quit")
+                        .borders(Borders::ALL),
+                )
+                .highlight_symbol("-> ");
+            f.render_stateful_widget(list, f.size(), &mut state);
+        })?;
+
+        if event::poll(std::time::Duration::from_millis(200))? {
+            if let Event::Key(key) = event::read()? {
+                match key.code {
+                    KeyCode::Up => {
+                        if let Some(sel) = state.selected() {
+                            let new = if sel > 0 { sel - 1 } else { targets.len() - 1 };
+                            state.select(Some(new));
+                        }
+                    }
+                    KeyCode::Down => {
+                        if let Some(sel) = state.selected() {
+                            let new = if sel + 1 < targets.len() { sel + 1 } else { 0 };
+                            state.select(Some(new));
+                        }
+                    }
+                    KeyCode::Char(' ') => {
+                        if let Some(sel) = state.selected() {
+                            selected[sel] = !selected[sel];
+                        }
+                    }
+                    KeyCode::Char('d') => {
+                        let chosen: Vec<PathBuf> = targets
+                            .iter()
+                            .cloned()
+                            .enumerate()
+                            .filter_map(|(i, p)| if selected[i] { Some(p) } else { None })
+                            .collect();
+                        return Ok(chosen);
+                    }
+                    KeyCode::Char('q') => return Ok(Vec::new()),
+                    _ => {}
+                }
+            }
+        }
+    }
 }
